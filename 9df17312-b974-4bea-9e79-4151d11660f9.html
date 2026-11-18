@@ -1,0 +1,172 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud Counter</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: #10131c;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    width: 90%;
+    max-width: 420px;
+    padding: 30px;
+    text-align: center;
+    background: #1c2230;
+    border: 1px solid #343d50;
+    border-radius: 22px;
+}
+
+h1 { font-size: 25px; }
+
+#number {
+    font-size: 75px;
+    font-weight: bold;
+    margin: 35px 0;
+    overflow-wrap: anywhere;
+}
+
+button {
+    width: 100%;
+    padding: 19px;
+    border: none;
+    border-radius: 13px;
+    background: #5278ff;
+    color: white;
+    font-size: 22px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button:disabled {
+    opacity: .5;
+    cursor: wait;
+}
+
+#status {
+    margin-top: 20px;
+    color: #aaa;
+    font-size: 13px;
+}
+
+.live {
+    color: #4ade80 !important;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+    <h1>☁️ Cloud Counter</h1>
+
+    <div id="number">Loading...</div>
+
+    <button id="add" disabled>+1</button>
+
+    <div id="status">Connecting to server...</div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://msnqpqkmtesdnwqrqnzi.supabase.co";
+const SUPABASE_KEY = "sb_publishable_TDeNH5NfwXmbuPyxu0DpZA_AnuqHwfM";
+
+const db = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_KEY
+);
+
+const number = document.getElementById("number");
+const button = document.getElementById("add");
+const status = document.getElementById("status");
+
+let count = 0;
+let ready = false;
+
+function updateNumber(value) {
+    count = Math.max(count, Number(value));
+    number.textContent = count.toLocaleString();
+}
+
+async function loadCounter() {
+    const { data, error } = await db
+        .from("counter")
+        .select("value")
+        .eq("id", 1)
+        .single();
+
+    if (error) {
+        status.textContent = "Loading failed: " + error.message;
+        return;
+    }
+
+    updateNumber(data.value);
+    ready = true;
+    button.disabled = false;
+}
+
+// Listen for changes from EVERY connected device
+db.channel("live-counter")
+    .on(
+        "postgres_changes",
+        {
+            event: "UPDATE",
+            schema: "public",
+            table: "counter",
+            filter: "id=eq.1"
+        },
+        (payload) => {
+            updateNumber(payload.new.value);
+            status.textContent = "● Live — changes synchronized";
+        }
+    )
+    .subscribe((state) => {
+        if (state === "SUBSCRIBED") {
+            status.textContent = "● Live connection active";
+            status.classList.add("live");
+        } else if (state === "CHANNEL_ERROR") {
+            status.textContent = "Live connection error";
+            status.classList.remove("live");
+        }
+    });
+
+// Increment directly on the server
+button.addEventListener("click", async () => {
+    if (!ready) return;
+
+    button.disabled = true;
+    status.textContent = "Updating...";
+
+    const { data, error } = await db.rpc(
+        "increment_counter"
+    );
+
+    if (error) {
+        status.textContent = "Error: " + error.message;
+    } else {
+        updateNumber(data);
+        status.textContent = "● Live — saved to cloud";
+    }
+
+    button.disabled = false;
+});
+
+loadCounter();
+</script>
+
+</body>
+</html>
